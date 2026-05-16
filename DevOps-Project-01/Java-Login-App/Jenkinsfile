@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    environment {
+        IMAGE_NAME = "badamteja/java-login-app"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Workspace Cleanup') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Clone Repository') {
+            steps {
+                git branch: 'master',
+                url: 'https://github.com/BadamTeja/DevOps-Projects.git'
+            }
+        }
+
+        stage('Build Maven Package') {
+            steps {
+                dir('DevOps-Project-01/Java-Login-App') {
+                    sh 'mvn clean package -DskipTests'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir('DevOps-Project-01/Java-Login-App') {
+
+                    sh '''
+                    docker build -t $IMAGE_NAME:$IMAGE_TAG .
+                    docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
+                    '''
+                }
+            }
+        }
+
+        stage('DockerHub Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+
+                    sh '''
+                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Images') {
+            steps {
+
+                sh '''
+                docker push $IMAGE_NAME:$IMAGE_TAG
+                docker push $IMAGE_NAME:latest
+                '''
+            }
+        }
+
+        stage('Deploy Container') {
+            steps {
+
+                sh '''
+                docker stop java-login-app || true
+                docker rm java-login-app || true
+
+                docker run -d \
+                --name java-login-app \
+                -p 8080:8080 \
+                $IMAGE_NAME:$IMAGE_TAG
+                '''
+            }
+        }
+
+        stage('Remove Old Docker Images') {
+            steps {
+
+                sh '''
+                docker image prune -af
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo 'Pipeline executed successfully!'
+        }
+
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
